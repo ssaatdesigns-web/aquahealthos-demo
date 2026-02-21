@@ -1,14 +1,28 @@
-# AquaHealthOS Demo
+# AquaHealthOS Demo (Option A stack)
 
-Backend: FastAPI (Render)
-Frontend: Next.js (Vercel)
-DB: Supabase Postgres
+## Stack
+- Frontend: Next.js (Vercel)
+- Backend: FastAPI (Render)
+- DB: Supabase Postgres
+- Alerts: dashboard-only
 
-## Run backend
-uvicorn app.main:app --reload
+## Local run (fast)
+### 1) Backend
+cd backend
+cp .env.example .env
+# set DATABASE_URL to your Supabase Postgres URI
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 
-## Run frontend
+### 2) Frontend
+cd ../frontend
+cp .env.example .env.local
+npm install
 npm run dev
+# open http://localhost:3000
 
-## Run simulator
+### 3) Simulator (generates live data)
+cd ../simulator
+cp .env.example .env
+pip install -r requirements.txt
 python simulate.py
