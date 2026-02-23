@@ -45,7 +45,7 @@ export default function SimToggle({ pondId }) {
       disabled={busy}
       className={`neo-btn ${running ? "neo-btn-on" : "neo-btn-off"}`}
     >
-      {running ? "Simulation ON" : "Simulation OFF"}
+      {running ? "DEVICE ON" : "DEVICE OFF"}
     </button>
   );
 }
