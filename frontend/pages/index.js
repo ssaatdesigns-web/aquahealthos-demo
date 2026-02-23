@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import React, { useEffect, useMemo, useState } from "react";
+import SimToggle from "../components/SimToggle";
+import { apiGet } from "../lib/api";
+
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -17,21 +19,25 @@ const POLL_MS = Number(process.env.NEXT_PUBLIC_POLL_MS || 5000);
 
 function fmt(n, d = 2) {
   if (n === null || n === undefined) return "-";
-  return Number(n).toFixed(d);
+  const v = Number(n);
+  if (Number.isNaN(v)) return "-";
+  return v.toFixed(d);
 }
 
-function severityLabel(sev) {
-  return sev === "HIGH" ? "HIGH" : sev === "MEDIUM" ? "MEDIUM" : "LOW";
+function statusColor(score) {
+  if (score >= 75) return "lime";
+  if (score >= 50) return "orange";
+  return "red";
 }
 
-export default function Home() {
+export default function Dashboard() {
   const [ponds, setPonds] = useState([]);
   const [pondId, setPondId] = useState(null);
 
   const [latest, setLatest] = useState(null);
-  const [health, setHealth] = useState(null);
   const [alerts, setAlerts] = useState([]);
-  const [series, setSeries] = useState([]);
+  const [forecast, setForecast] = useState(null);
+
   const [err, setErr] = useState("");
 
   async function loadPonds() {
@@ -44,16 +50,14 @@ export default function Home() {
     if (!id) return;
     setErr("");
     try {
-      const [l, h, a, s] = await Promise.all([
+      const [l, a, f] = await Promise.all([
         apiGet(`/api/v1/ponds/${id}/latest`),
-        apiGet(`/api/v1/ponds/${id}/health`),
-        apiGet(`/api/v1/ponds/${id}/alerts?include_resolved=false&limit=50`),
-        apiGet(`/api/v1/ponds/${id}/timeseries?range_hours=24&limit=1000`)
+        apiGet(`/api/v1/ponds/${id}/alerts?limit=10`),
+        apiGet(`/api/v1/ponds/${id}/forecast?hours=24&step_minutes=60`)
       ]);
       setLatest(l);
-      setHealth(h);
       setAlerts(a);
-      setSeries(s.points || []);
+      setForecast(f);
     } catch (e) {
       setErr(String(e.message || e));
     }
@@ -72,43 +76,38 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pondId]);
 
-  async function resolveAlert(id) {
-    await apiPost(`/api/v1/alerts/${id}/resolve`);
-    await loadAll(pondId);
-  }
+  const forecastPoints = forecast?.points || [];
 
-  const chartData = useMemo(() => {
-    const labels = series.map(p => new Date(p.t).toLocaleTimeString());
+  const forecastChartData = useMemo(() => {
+    const labels = forecastPoints.map(p => new Date(p.t).toLocaleString([], { hour: "2-digit", minute: "2-digit" }));
     return {
       labels,
       datasets: [
-        { label: "DO (mg/L)", data: series.map(p => p.dissolved_oxygen) },
-        { label: "Ammonia", data: series.map(p => p.ammonia) },
-        { label: "Health Score", data: series.map(p => p.health_score) }
+        { label: "Pred Health Score", data: forecastPoints.map(p => p.health_score) },
+        { label: "Pred DO (mg/L)", data: forecastPoints.map(p => p.dissolved_oxygen) },
+        { label: "Pred Ammonia", data: forecastPoints.map(p => p.ammonia) }
       ]
     };
-  }, [series]);
+  }, [forecastPoints]);
 
-  const chartOptions = useMemo(() => ({
+  const forecastChartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { position: "top" } },
-    scales: {
-      y: { beginAtZero: true }
-    }
+    scales: { y: { beginAtZero: true } }
   }), []);
 
-  const statusBadge = health?.status ? (
-    <span className="badge">{health.status}</span>
-  ) : null;
+  const summary = forecast?.summary;
 
   return (
     <div className="container">
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="h1">AquaHealthOS Demo</div>
-        <div className="muted">Live pond monitoring — dashboard alerts only</div>
+      <div className="card">
+        <h1 className="h1">
+          AquaHealthOS Dashboard <span className="badge">Live Monitoring</span>
+        </h1>
+        <div className="muted">Dashboard alerts only • Polling: {POLL_MS}ms</div>
 
-        <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <label className="muted">Pond:</label>
           <select
             className="select"
@@ -116,108 +115,182 @@ export default function Home() {
             onChange={(e) => setPondId(Number(e.target.value))}
           >
             {ponds.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.species})
-              </option>
+              <option key={p.id} value={p.id}>{p.name} ({p.species})</option>
             ))}
           </select>
-          <span className="muted">Polling: {POLL_MS}ms</span>
+
+          <div style={{ marginLeft: "auto" }}>
+            <SimToggle pondId={pondId || 1} />
+          </div>
         </div>
 
-        {err ? <div style={{ marginTop: 12, color: "crimson" }}>{err}</div> : null}
+        {err ? <div className="err" style={{ marginTop: 10 }}>{err}</div> : null}
       </div>
 
-      <div className="row">
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <div className="h1" style={{ fontSize: 18, marginBottom: 0 }}>Health</div>
-            {statusBadge}
-          </div>
-
-          <div className="kpi" style={{ marginTop: 12 }}>
-            <div className="kpiBox">
-              <div className="kpiTitle">Health Score</div>
-              <div className="kpiValue">{fmt(health?.health_score, 1)}</div>
-            </div>
-            <div className="kpiBox">
-              <div className="kpiTitle">DO Risk</div>
-              <div className="kpiValue">{fmt(health?.do_risk, 1)}</div>
-            </div>
-            <div className="kpiBox">
-              <div className="kpiTitle">Ammonia Risk</div>
-              <div className="kpiValue">{fmt(health?.nh3_risk, 1)}</div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 14 }} className="muted">
-            Latest reading:{" "}
-            {latest ? new Date(latest.created_at).toLocaleString() : "-"}
-          </div>
-
-          <div className="kpi" style={{ marginTop: 12 }}>
-            <div className="kpiBox">
-              <div className="kpiTitle">DO (mg/L)</div>
-              <div className="kpiValue">{fmt(latest?.dissolved_oxygen, 2)}</div>
-            </div>
-            <div className="kpiBox">
-              <div className="kpiTitle">Ammonia</div>
-              <div className="kpiValue">{fmt(latest?.ammonia, 3)}</div>
-            </div>
-            <div className="kpiBox">
-              <div className="kpiTitle">Temp (°C)</div>
-              <div className="kpiValue">{fmt(latest?.temperature, 1)}</div>
-            </div>
-          </div>
-
-          <div className="kpi" style={{ marginTop: 12 }}>
-            <div className="kpiBox">
-              <div className="kpiTitle">pH</div>
-              <div className="kpiValue">{fmt(latest?.ph, 2)}</div>
-            </div>
-            <div className="kpiBox">
-              <div className="kpiTitle">Turbidity</div>
-              <div className="kpiValue">{fmt(latest?.turbidity, 1)}</div>
-            </div>
-            <div className="kpiBox">
-              <div className="kpiTitle">Reading ID</div>
-              <div className="kpiValue">{latest?.id ?? "-"}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="h1" style={{ fontSize: 18 }}>Alerts (Unresolved)</div>
-          <div className="muted">Resolve alerts to clear them from the active list.</div>
-
-          <div style={{ marginTop: 10 }}>
-            {alerts.length === 0 ? (
-              <div className="muted" style={{ marginTop: 10 }}>No active alerts</div>
-            ) : (
-              alerts.map(a => (
-                <div key={a.id} className="alert">
-                  <div>
-                    <div><b>{severityLabel(a.severity)}</b> — {a.message}</div>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {new Date(a.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                  <button className="btn" onClick={() => resolveAlert(a.id)}>
-                    Resolve
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
+      {/* KPIs */}
       <div className="card" style={{ marginTop: 16 }}>
-        <div className="h1" style={{ fontSize: 18 }}>Trends (Last 24h)</div>
-        <div className="muted">DO, Ammonia, and Health Score time series.</div>
+        <div className="h1" style={{ fontSize: 18 }}>Live Health</div>
 
-        <div style={{ height: 380, marginTop: 12 }}>
-          <Line data={chartData} options={chartOptions} />
+        {!latest ? (
+          <div className="muted" style={{ marginTop: 8 }}>
+            No readings yet. Start simulation.
+          </div>
+        ) : (
+          <>
+            <div className="kpi" style={{ marginTop: 12 }}>
+              <div className="kpiBox">
+                <div className="kpiTitle">Health Score</div>
+                <div className="kpiValue" style={{ color: statusColor(latest.health_score) }}>
+                  {fmt(latest.health_score, 1)}
+                </div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">DO (mg/L)</div>
+                <div className="kpiValue">{fmt(latest.dissolved_oxygen, 2)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">Ammonia</div>
+                <div className="kpiValue">{fmt(latest.ammonia, 3)}</div>
+              </div>
+            </div>
+
+            <div className="kpi" style={{ marginTop: 12 }}>
+              <div className="kpiBox">
+                <div className="kpiTitle">Temperature (°C)</div>
+                <div className="kpiValue">{fmt(latest.temperature, 1)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">pH</div>
+                <div className="kpiValue">{fmt(latest.ph, 2)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">Turbidity</div>
+                <div className="kpiValue">{fmt(latest.turbidity, 1)}</div>
+              </div>
+            </div>
+
+            <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+              Last update: {new Date(latest.created_at).toLocaleString()}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Alerts */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="h1" style={{ fontSize: 18 }}>Recent Alerts</div>
+        {alerts.length === 0 ? (
+          <div className="muted" style={{ marginTop: 8 }}>No active alerts.</div>
+        ) : (
+          alerts.map(a => (
+            <div key={a.id} className="alert">
+              <div>
+                <div><b>{String(a.severity).toUpperCase()}</b> — {a.message}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{new Date(a.created_at).toLocaleString()}</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* AI Forecast */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="h1" style={{ fontSize: 18 }}>AI Prediction (Next 24 Hours)</div>
+        <div className="muted">
+          Baseline trend forecast using recent readings → predicted DO/ammonia → risk engine → health score.
         </div>
+
+        {!forecastPoints.length ? (
+          <div className="muted" style={{ marginTop: 10 }}>
+            {forecast?.summary?.message || "Forecast unavailable. Start simulation and wait for a few readings."}
+          </div>
+        ) : (
+          <>
+            {/* Summary */}
+            <div className="kpi" style={{ marginTop: 12 }}>
+              <div className="kpiBox">
+                <div className="kpiTitle">Predicted GOOD hours</div>
+                <div className="kpiValue">{fmt(summary?.good_hours, 1)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">Predicted WATCH hours</div>
+                <div className="kpiValue">{fmt(summary?.watch_hours, 1)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">Predicted CRITICAL hours</div>
+                <div className="kpiValue">{fmt(summary?.critical_hours, 1)}</div>
+              </div>
+            </div>
+
+            <div className="kpi" style={{ marginTop: 12 }}>
+              <div className="kpiBox">
+                <div className="kpiTitle">DO trend (mg/L per hour)</div>
+                <div className="kpiValue">{fmt(summary?.do_slope_per_hour, 4)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">Ammonia trend (per hour)</div>
+                <div className="kpiValue">{fmt(summary?.nh3_slope_per_hour, 5)}</div>
+              </div>
+              <div className="kpiBox">
+                <div className="kpiTitle">Forecast step</div>
+                <div className="kpiValue">{forecast?.step_minutes} min</div>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div style={{ height: 380, marginTop: 14 }}>
+              <Line data={forecastChartData} options={forecastChartOptions} />
+            </div>
+
+            {/* Table */}
+            <div style={{ marginTop: 14, overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>Time</th>
+                    <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>Status</th>
+                    <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>Health</th>
+                    <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>DO</th>
+                    <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>NH3</th>
+                    <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>Temp</th>
+                    <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>pH</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {forecastPoints.map((p, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        {new Date(p.t).toLocaleString()}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        <span className="badge">{p.status}</span>
+                      </td>
+                      <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid rgba(255,255,255,0.06)", color: statusColor(p.health_score) }}>
+                        {fmt(p.health_score, 2)}
+                      </td>
+                      <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        {fmt(p.dissolved_oxygen, 2)}
+                      </td>
+                      <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        {fmt(p.ammonia, 4)}
+                      </td>
+                      <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        {fmt(p.temperature, 1)}
+                      </td>
+                      <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        {fmt(p.ph, 2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+              Generated at: {new Date(forecast.generated_at).toLocaleString()}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
