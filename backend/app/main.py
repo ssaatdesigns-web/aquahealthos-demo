@@ -1,4 +1,5 @@
 # backend/app/main.py
+
 import os
 import threading
 import time
@@ -17,30 +18,27 @@ from .risk_engine import calculate_risk
 app = FastAPI(title="AquaHealthOS Demo", version="1.0.0")
 
 
-# -----------------------------
-# CORS
-# -----------------------------
-def _parse_origins(raw: str) -> list[str]:
-    if not raw:
-        return ["*"]
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    return parts or ["*"]
-
-
-origins = _parse_origins(os.getenv("CORS_ORIGINS", ""))
+# =============================
+# 🔥 FIXED CORS (IMPORTANT)
+# =============================
+FRONTEND_URL = "https://aquahealthos-demo.vercel.app"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        FRONTEND_URL,
+        "http://localhost:3000",
+        "*"  # keep for safety
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# -----------------------------
+# =============================
 # Simulation controller
-# -----------------------------
+# =============================
 _sim_running: dict[int, bool] = {}
 _sim_threads: dict[int, threading.Thread] = {}
 _sim_lock = threading.Lock()
@@ -79,10 +77,7 @@ def _create_reading_and_alerts(db: Session, pond_id: int, do, temp, ammonia, ph,
 
 
 def _sim_loop(pond_id: int, interval_sec: int, incident_mode: bool):
-    t = 0
-
     while _sim_running.get(pond_id, False):
-        t += 1
 
         do = 6 + random.uniform(-1, 1)
         temp = 28 + random.uniform(-2, 2)
@@ -107,7 +102,11 @@ def _start_sim(pond_id: int, interval_sec: int, incident_mode: bool):
         return False
 
     _sim_running[pond_id] = True
-    t = threading.Thread(target=_sim_loop, args=(pond_id, interval_sec, incident_mode), daemon=True)
+    t = threading.Thread(
+        target=_sim_loop,
+        args=(pond_id, interval_sec, incident_mode),
+        daemon=True
+    )
     t.start()
     _sim_threads[pond_id] = t
     return True
@@ -122,9 +121,9 @@ def _sim_status(pond_id: int):
     return _sim_running.get(pond_id, False)
 
 
-# -----------------------------
-# SAFE STARTUP (FIXED)
-# -----------------------------
+# =============================
+# Startup (DB + Seed)
+# =============================
 @app.on_event("startup")
 def startup():
     try:
@@ -148,35 +147,46 @@ def startup():
         print("❌ DB FAILED BUT APP CONTINUES:", e)
 
 
-# -----------------------------
+# =============================
 # Health
-# -----------------------------
+# =============================
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
 
 
-# -----------------------------
+# =============================
 # Simulation API
-# -----------------------------
+# =============================
 @app.get("/api/v1/sim/status/{pond_id}")
 def sim_status(pond_id: int):
-    return {"pond_id": pond_id, "running": _sim_status(pond_id)}
+    return {
+        "pond_id": pond_id,
+        "running": _sim_status(pond_id)
+    }
 
 
 @app.post("/api/v1/sim/start/{pond_id}")
 def sim_start(pond_id: int, interval_sec: int = 5, incident_mode: bool = True):
     started = _start_sim(pond_id, interval_sec, incident_mode)
-    return {"pond_id": pond_id, "running": _sim_status(pond_id), "started": started}
+    return {
+        "pond_id": pond_id,
+        "running": _sim_status(pond_id),
+        "started": started
+    }
 
 
 @app.post("/api/v1/sim/stop/{pond_id}")
 def sim_stop(pond_id: int):
     stopped = _stop_sim(pond_id)
-    return {"pond_id": pond_id, "running": _sim_status(pond_id), "stopped": stopped}
+    return {
+        "pond_id": pond_id,
+        "running": _sim_status(pond_id),
+        "stopped": stopped
+    }
 
 
-# -----------------------------
+# =============================
 # Main API routes
-# -----------------------------
+# =============================
 app.include_router(router)
