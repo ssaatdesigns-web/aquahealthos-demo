@@ -71,6 +71,8 @@ def _create_reading_and_alerts(db: Session, pond_id: int, do, temp, ammonia, ph,
 
 
 def _sim_loop(pond_id: int, interval_sec: int, incident_mode: bool):
+    print(f"🚀 Simulator started for pond {pond_id}")
+
     while _sim_running.get(pond_id, False):
 
         do = 6 + random.uniform(-1, 1)
@@ -79,12 +81,24 @@ def _sim_loop(pond_id: int, interval_sec: int, incident_mode: bool):
         ph = 7.5 + random.uniform(-0.3, 0.3)
         turb = 10 + random.uniform(-3, 3)
 
+        print(f"📊 Simulating pond {pond_id}")
+        print("➡️ Values:", do, temp, ammonia, ph, turb)
+
         db = SessionLocal()
         try:
             _ensure_pond(db, pond_id)
-            _create_reading_and_alerts(db, pond_id, do, temp, ammonia, ph, turb)
+
+            print("💾 Inserting reading...")
+            _create_reading_and_alerts(
+                db, pond_id, do, temp, ammonia, ph, turb
+            )
+            print("✅ Insert success")
+
         except Exception as e:
-            print("SIM ERROR:", e)
+            import traceback
+            print("❌ SIM ERROR:", e)
+            traceback.print_exc()
+
         finally:
             db.close()
 
