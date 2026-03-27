@@ -11,7 +11,7 @@ export default function SimToggle({ pondId }) {
       const data = await apiGet(`/api/v1/sim/status/${pondId}`);
       setRunning(Boolean(data.running));
     } catch (e) {
-      setErr(e.message || "Failed to fetch status");
+      setErr(e.message || ".");
     }
   }
 
