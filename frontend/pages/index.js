@@ -120,7 +120,7 @@ export default function Dashboard() {
           </select>
 
           <div style={{ marginLeft: "auto" }}>
-            <SimToggle pondId={pondId || 1} />
+            {pondId && <SimToggle pondId={pondId} />}
           </div>
         </div>
 
