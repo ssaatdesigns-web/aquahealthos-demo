@@ -21,21 +21,15 @@ app = FastAPI(title="AquaHealthOS Demo", version="1.0.0")
 # =============================
 # 🔥 FIXED CORS (IMPORTANT)
 # =============================
-FRONTEND_URL = "https://aquahealthos-demo.vercel.app"
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        FRONTEND_URL,
-        "http://localhost:3000",
-        "*"  # keep for safety
+        "https://aquahealthos-demo.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
 # =============================
 # Simulation controller
 # =============================
