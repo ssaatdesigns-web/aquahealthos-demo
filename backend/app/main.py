@@ -18,14 +18,15 @@ from .risk_engine import calculate_risk
 app = FastAPI(title="AquaHealthOS Demo", version="1.0.0")
 
 
-# =============================
-# 🔥 FIXED CORS (IMPORTANT)
-# =============================
+# -----------------------------
+# 🔥 FINAL CORS FIX
+# -----------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://aquahealthos-demo.vercel.app"
+        "https://aquahealthos-demo.vercel.app",
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # 🔥 IMPORTANT
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
