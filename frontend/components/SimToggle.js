@@ -1,6 +1,5 @@
-// frontend/components/SimToggle.js
 import React, { useEffect, useState } from "react";
-import { apiGet, apiPost, API_BASE } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 
 export default function SimToggle({ pondId }) {
   const [running, setRunning] = useState(false);
@@ -12,40 +11,53 @@ export default function SimToggle({ pondId }) {
       const data = await apiGet(`/api/v1/sim/status/${pondId}`);
       setRunning(Boolean(data.running));
     } catch (e) {
-      setErr(String(e));
+      setErr(e.message || "Failed to fetch status");
     }
   }
 
   useEffect(() => {
+    if (!pondId) return;
+
     refresh();
-    const t = setInterval(refresh, 5000);
+    const t = setInterval(refresh, 3000); // faster sync
     return () => clearInterval(t);
   }, [pondId]);
 
   async function toggle() {
+    if (!pondId) return;
+
     setBusy(true);
+    setErr("");
+
     try {
       if (running) {
         await apiPost(`/api/v1/sim/stop/${pondId}`);
-        setRunning(false);
       } else {
-        await apiPost(`/api/v1/sim/start/${pondId}?interval_sec=5&incident_mode=true`);
-        setRunning(true);
+        await apiPost(`/api/v1/sim/start/${pondId}?interval_sec=2&incident_mode=true`);
       }
+
+      // 🔥 HARD SYNC FROM BACKEND (THIS FIXES YOUR ISSUE)
+      const data = await apiGet(`/api/v1/sim/status/${pondId}`);
+      setRunning(Boolean(data.running));
+
     } catch (e) {
-      setErr(String(e));
+      setErr(e.message || "Toggle failed");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <button
-      onClick={toggle}
-      disabled={busy}
-      className={`neo-btn ${running ? "neo-btn-on" : "neo-btn-off"}`}
-    >
-      {running ? "DEVICE ON" : "DEVICE OFF"}
-    </button>
+    <div>
+      <button
+        onClick={toggle}
+        disabled={busy}
+        className={`neo-btn ${running ? "neo-btn-on" : "neo-btn-off"}`}
+      >
+        {running ? "DEVICE ON" : "DEVICE OFF"}
+      </button>
+
+      {err && <div className="err">{err}</div>}
+    </div>
   );
 }
