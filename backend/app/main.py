@@ -8,8 +8,9 @@ import traceback
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from .database import engine, Base, SessionLocal
@@ -19,7 +20,7 @@ from .risk_engine import calculate_risk
 
 
 # =============================
-# CORS (stable)
+# CORS origins
 # =============================
 def _get_allowed_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "").strip()
@@ -47,7 +48,7 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def _ensure_pond(db: Session, pond_id: int) -> Pond:
-    """Raises ValueError (not HTTPException) — safe to call from background threads."""
+    """Raises ValueError — safe to call from background threads."""
     pond = db.query(Pond).filter(Pond.id == pond_id).first()
     if not pond:
         raise ValueError(f"Pond {pond_id} not found")
@@ -98,17 +99,17 @@ def _sim_loop(pond_id: int, interval_sec: int, incident_mode: bool) -> None:
                 break
 
         if incident_mode:
-            do = _clamp(5.5 + random.uniform(-1.5, 0.4), 0.5, 12.0)
-            temp = _clamp(29.0 + random.uniform(-2.0, 2.5), 10.0, 40.0)
-            ammonia = _clamp(0.25 + random.uniform(0.0, 0.35), 0.0, 2.0)
-            ph = _clamp(7.6 + random.uniform(-0.5, 0.5), 6.0, 9.5)
-            turb = _clamp(14.0 + random.uniform(-4.0, 8.0), 0.0, 200.0)
+            do      = _clamp(5.5 + random.uniform(-1.5, 0.4),  0.5, 12.0)
+            temp    = _clamp(29.0 + random.uniform(-2.0, 2.5), 10.0, 40.0)
+            ammonia = _clamp(0.25 + random.uniform(0.0, 0.35),  0.0,  2.0)
+            ph      = _clamp(7.6  + random.uniform(-0.5, 0.5),  6.0,  9.5)
+            turb    = _clamp(14.0 + random.uniform(-4.0, 8.0),  0.0, 200.0)
         else:
-            do = _clamp(6.5 + random.uniform(-1.0, 1.0), 0.5, 12.0)
-            temp = _clamp(28.0 + random.uniform(-2.0, 2.0), 10.0, 40.0)
-            ammonia = _clamp(0.1 + random.uniform(0.0, 0.2), 0.0, 2.0)
-            ph = _clamp(7.5 + random.uniform(-0.3, 0.3), 6.0, 9.5)
-            turb = _clamp(10.0 + random.uniform(-3.0, 3.0), 0.0, 200.0)
+            do      = _clamp(6.5 + random.uniform(-1.0, 1.0),  0.5, 12.0)
+            temp    = _clamp(28.0 + random.uniform(-2.0, 2.0), 10.0, 40.0)
+            ammonia = _clamp(0.1  + random.uniform(0.0, 0.2),   0.0,  2.0)
+            ph      = _clamp(7.5  + random.uniform(-0.3, 0.3),  6.0,  9.5)
+            turb    = _clamp(10.0 + random.uniform(-3.0, 3.0),  0.0, 200.0)
 
         print(f"📊 Simulating pond {pond_id}")
         print("➡️ Values:", do, temp, ammonia, ph, turb)
@@ -132,7 +133,6 @@ def _start_sim(pond_id: int, interval_sec: int, incident_mode: bool) -> bool:
     with _sim_lock:
         if _sim_running.get(pond_id, False):
             return False
-
         _sim_running[pond_id] = True
         t = threading.Thread(
             target=_sim_loop,
@@ -158,7 +158,7 @@ def _sim_status(pond_id: int) -> bool:
 
 
 # =============================
-# Lifespan (replaces deprecated @app.on_event)
+# Lifespan
 # =============================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -184,13 +184,32 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         print("❌ DB ERROR:", e)
-        print("⚠️ App will continue without DB seeding")
+        traceback.print_exc()
+        print("⚠️ App will continue — check DATABASE_URL env var")
 
     yield  # App runs here
 
 
+# =============================
+# App
+# =============================
 app = FastAPI(title="AquaHealthOS Demo", version="1.0.0", lifespan=lifespan)
 
+# -----------------------------------------------------------------
+# CRITICAL FIX: catch ALL unhandled exceptions at the app level
+# (before they propagate past CORSMiddleware to ServerErrorMiddleware,
+#  which would produce a 500 response without any CORS headers)
+# -----------------------------------------------------------------
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {type(exc).__name__}: {exc}"},
+    )
+
+
+# CORS — must be added AFTER the exception handler above
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_get_allowed_origins(),
@@ -219,30 +238,19 @@ def healthz():
 # =============================
 @app.get("/api/v1/sim/status/{pond_id}")
 def sim_status(pond_id: int):
-    return {
-        "pond_id": pond_id,
-        "running": _sim_status(pond_id),
-    }
+    return {"pond_id": pond_id, "running": _sim_status(pond_id)}
 
 
 @app.post("/api/v1/sim/start/{pond_id}")
 def sim_start(pond_id: int, interval_sec: int = 5, incident_mode: bool = True):
     started = _start_sim(pond_id, interval_sec, incident_mode)
-    return {
-        "pond_id": pond_id,
-        "running": _sim_status(pond_id),
-        "started": started,
-    }
+    return {"pond_id": pond_id, "running": _sim_status(pond_id), "started": started}
 
 
 @app.post("/api/v1/sim/stop/{pond_id}")
 def sim_stop(pond_id: int):
     stopped = _stop_sim(pond_id)
-    return {
-        "pond_id": pond_id,
-        "running": _sim_status(pond_id),
-        "stopped": stopped,
-    }
+    return {"pond_id": pond_id, "running": _sim_status(pond_id), "stopped": stopped}
 
 
 # =============================
